@@ -46,3 +46,37 @@ app.post('/api/vehicle/decode', async (req, res) => {
     const { vin } = req.body;
     
     if (!vin || vin.length !== 17) {
+app.post('/api/vehicle/decode', async (req, res) => {
+    const { vin } = req.body;
+    
+    if (!vin || vin.length !== 17) {
+        return res.status(400).json({ 
+            error: 'Invalid VIN. Must be 17 characters.' 
+        });
+    }
+    
+    try {
+        // Use axios to call NHTSA VIN decoder API
+        const response = await axios.get(
+            `https://vpic.nhtsa.dot.gov/api/vehicles/decodevin/${vin}?format=json`
+        );
+        const data = response.data;
+        
+        // Extract key information from NHTSA response
+        const getValue = (variableId) => {
+            const result = data.Results.find(r => r.VariableId === variableId);
+            return result ? result.Value : null;
+        };
+        
+        const vehicleInfo = {
+            vin: vin,
+            year: getValue(29) || 'Unknown',
+            make: getValue(26) || 'Unknown',
+            model: getValue(28) || 'Unknown',
+            trim: getValue(109) || '',
+            engineSize: getValue(71) || '',
+            engineCylinders: getValue(70) || '',
+            fuelType: getValue(24) || '',
+            bodyClass: getValue(5) || '',
+            doors: getValue(14) || '',
+            driveType: getValue(15) || '',
