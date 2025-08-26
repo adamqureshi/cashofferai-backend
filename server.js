@@ -1,9 +1,10 @@
 const express = require('express');
 const cors = require('cors');
-
+const axios = require('axios');  // Add axios here
 const app = express();
-app.use(cors());
 app.use(express.json());
+app.use(cors());
+
 
 app.get('/', (req, res) => {
     res.json({ 
