@@ -10,7 +10,7 @@ app.use(express.json());
 
 // Initialize AgentDB
 const agentDB = new AgentDB({
-    apiKey: process.env.AGENTDB_API_KEY || 'your_key_here'
+    apiKey: process.env.AGENTDB_API_KEY || 'agentdb_06ddb6fa0ed316dcb7cefd84a7d9501fef7d3b6a605f5570a8a74a766f3cc7bd'
 });
 const dbId = process.env.AGENTDB_DATABASE_ID || 'cashofferai_main';
 
