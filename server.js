@@ -80,8 +80,8 @@ app.post('/api/vehicle/decode', async (req, res) => {
             make: getValue(26) || 'Unknown', 
             model: getValue(28) || 'Unknown',
             trim: getValue(109) || '',
-            engineSize: getValue(71) || '',
-            engineCylinders: getValue(70) || '',
+            engineSize: getValue(71) || getValue(13) || '',  // Try both CC and L
+            engineCylinders: getValue(9) || getValue(70) || '',
             fuelType: getValue(24) || '',
             bodyClass: getValue(5) || '',
             doors: getValue(14) || '',
@@ -91,23 +91,35 @@ app.post('/api/vehicle/decode', async (req, res) => {
             manufacturer: getValue(27) || '',
             plantCountry: getValue(75) || '',
             transmission: getValue(37) || '',
-            errorCode: getValue(143) || '0'
+            errorCode: getValue(143) || '0',
+            errorText: getValue(191) || ''
         };
         
-        // Check for VIN decode errors
-        if (vehicleInfo.errorCode !== '0' && vehicleInfo.errorCode !== '0 - VIN decoded clean. Check Digit (9th position) is correct') {
+        console.log('Extracted vehicle info:', {
+            make: vehicleInfo.make,
+            model: vehicleInfo.model,
+            year: vehicleInfo.year,
+            errorCode: vehicleInfo.errorCode
+        });
+        
+        // Handle NHTSA error codes more gracefully
+        // Error code 8 means limited data, but we can still use what we have
+        if (vehicleInfo.errorCode === '8') {
+            console.log('NHTSA has limited data for this VIN, using what is available');
+        }
+        
+        // Only fail for truly invalid VINs
+        if (!vehicleInfo.year || vehicleInfo.year === 'Unknown' || vehicleInfo.year === null) {
             return res.status(400).json({
-                error: 'VIN not found or invalid',
-                details: vehicleInfo.errorCode
+                error: 'Invalid VIN',
+                details: 'Could not decode VIN - no year data available'
             });
         }
         
-        // Check if we got valid data
-        if (!vehicleInfo.make || vehicleInfo.make === 'Unknown') {
-            return res.status(400).json({
-                error: 'VIN not found',
-                details: 'Could not retrieve vehicle information'
-            });
+        // If we have at least year and make, continue with what we have
+        // Fill in "Unknown" for missing model
+        if (!vehicleInfo.model || vehicleInfo.model === null) {
+            vehicleInfo.model = vehicleInfo.make ? `${vehicleInfo.make} Vehicle` : 'Unknown Model';
         }
         
         // Calculate base value
