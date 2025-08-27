@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-require('dotenv').config();
 
 const app = express();
 
@@ -68,6 +67,8 @@ app.post('/api/vehicle/decode', async (req, res) => {
     try {
         // Use carAPI to decode VIN
         console.log('Decoding VIN with carAPI:', vin);
+        console.log('Token exists:', !!process.env.CARAPI_TOKEN);
+        console.log('Token value:', process.env.CARAPI_TOKEN?.substring(0, 10) + '...');
         
         const response = await axios.get(
             `${CARAPI_BASE_URL}/vin/${vin}`,
