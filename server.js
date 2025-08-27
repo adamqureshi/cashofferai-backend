@@ -12,6 +12,44 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// JWT token caching
+let cachedJWT = null;
+let jwtExpiry = null;
+
+// Helper function to get JWT token from carAPI
+async function getCarAPIToken() {
+    // Check if we have a valid cached token
+    if (cachedJWT && jwtExpiry && new Date() < jwtExpiry) {
+        console.log('Using cached JWT token');
+        return cachedJWT;
+    }
+    
+    console.log('Generating new JWT token from carAPI');
+    
+    try {
+        const loginResponse = await axios.post('https://carapi.app/api/auth/login', {
+            api_token: process.env.CARAPI_TOKEN,
+            api_secret: process.env.CARAPI_SECRET
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': 'text/plain'
+            }
+        });
+        
+        // The response is the JWT token as plain text
+        cachedJWT = loginResponse.data;
+        // JWT expires in 7 days, but let's refresh it after 6 days to be safe
+        jwtExpiry = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
+        
+        console.log('JWT token generated successfully');
+        return cachedJWT;
+    } catch (error) {
+        console.error('Failed to get JWT token:', error.response?.data || error.message);
+        throw error;
+    }
+}
+
 app.get('/', (req, res) => {
     res.json({ 
         message: 'Cash Offer AI Backend API',
@@ -47,43 +85,6 @@ app.post('/api/users/create', (req, res) => {
         created: true
     });
 });
-
-// Helper function to get JWT token from carAPI
-let cachedJWT = null;
-let jwtExpiry = null;
-
-async function getCarAPIToken() {
-    // Check if we have a valid cached token
-    if (cachedJWT && jwtExpiry && new Date() < jwtExpiry) {
-        console.log('Using cached JWT token');
-        return cachedJWT;
-    }
-    
-    console.log('Generating new JWT token from carAPI');
-    
-    try {
-        const loginResponse = await axios.post('https://carapi.app/api/auth/login', {
-            api_token: process.env.CARAPI_TOKEN,
-            api_secret: process.env.CARAPI_SECRET
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'accept': 'text/plain'
-            }
-        });
-        
-        // The response is the JWT token as plain text
-        cachedJWT = loginResponse.data;
-        // JWT expires in 7 days, but let's refresh it after 6 days to be safe
-        jwtExpiry = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
-        
-        console.log('JWT token generated successfully');
-        return cachedJWT;
-    } catch (error) {
-        console.error('Failed to get JWT token:', error.response?.data || error.message);
-        throw error;
-    }
-}
 
 app.post('/api/vehicle/decode', async (req, res) => {
     const { vin } = req.body;
@@ -242,6 +243,9 @@ function calculateBaseValue(vehicle, msrp) {
     
     return Math.round(baseValue);
 }
+
+// Export for Vercel
+module.exports = app;
 
 // Export for Vercel
 module.exports = app;
