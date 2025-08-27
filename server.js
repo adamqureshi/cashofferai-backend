@@ -4,20 +4,13 @@ const axios = require('axios');
 
 const app = express();
 
-// Configure CORS to allow all origins during development
+// Configure CORS
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
-
-// CarAPI configuration
-const CARAPI_BASE_URL = 'https://carapi.app/api';
-const CARAPI_HEADERS = {
-    'Authorization': `Bearer ${process.env.CARAPI_TOKEN}`,
-    'Content-Type': 'application/json'
-};
 
 app.get('/', (req, res) => {
     res.json({ 
@@ -55,6 +48,43 @@ app.post('/api/users/create', (req, res) => {
     });
 });
 
+// Helper function to get JWT token from carAPI
+let cachedJWT = null;
+let jwtExpiry = null;
+
+async function getCarAPIToken() {
+    // Check if we have a valid cached token
+    if (cachedJWT && jwtExpiry && new Date() < jwtExpiry) {
+        console.log('Using cached JWT token');
+        return cachedJWT;
+    }
+    
+    console.log('Generating new JWT token from carAPI');
+    
+    try {
+        const loginResponse = await axios.post('https://carapi.app/api/auth/login', {
+            api_token: process.env.CARAPI_TOKEN,
+            api_secret: process.env.CARAPI_SECRET
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': 'text/plain'
+            }
+        });
+        
+        // The response is the JWT token as plain text
+        cachedJWT = loginResponse.data;
+        // JWT expires in 7 days, but let's refresh it after 6 days to be safe
+        jwtExpiry = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
+        
+        console.log('JWT token generated successfully');
+        return cachedJWT;
+    } catch (error) {
+        console.error('Failed to get JWT token:', error.response?.data || error.message);
+        throw error;
+    }
+}
+
 app.post('/api/vehicle/decode', async (req, res) => {
     const { vin } = req.body;
     
@@ -65,19 +95,38 @@ app.post('/api/vehicle/decode', async (req, res) => {
     }
     
     try {
-        // Use carAPI to decode VIN
-        console.log('Decoding VIN with carAPI:', vin);
-        console.log('Token exists:', !!process.env.CARAPI_TOKEN);
-        console.log('Token value:', process.env.CARAPI_TOKEN?.substring(0, 10) + '...');
+        // Log for debugging
+        console.log('VIN decode request for:', vin);
+        console.log('CARAPI_TOKEN exists:', !!process.env.CARAPI_TOKEN);
+        console.log('CARAPI_SECRET exists:', !!process.env.CARAPI_SECRET);
         
-        const response = await axios.get(
-            `${CARAPI_BASE_URL}/vin/${vin}`,
-            { headers: CARAPI_HEADERS }
-        );
+        // Check if credentials are available
+        if (!process.env.CARAPI_TOKEN || !process.env.CARAPI_SECRET) {
+            console.error('carAPI credentials not found in environment variables');
+            return res.status(500).json({ 
+                error: 'API configuration error',
+                message: 'carAPI credentials not configured' 
+            });
+        }
+        
+        // Get JWT token
+        const jwtToken = await getCarAPIToken();
+        
+        // Make request to carAPI with JWT
+        const carApiUrl = `https://carapi.app/api/vin/${vin}`;
+        console.log('Calling carAPI with JWT token');
+        
+        const response = await axios.get(carApiUrl, {
+            headers: {
+                'Authorization': `Bearer ${jwtToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
         
         const data = response.data;
+        console.log('carAPI response received');
         
-        // Extract and map carAPI response to our format
+        // Map carAPI response to our format
         const vehicleInfo = {
             vin: vin,
             year: data.year || 'Unknown',
@@ -94,7 +143,6 @@ app.post('/api/vehicle/decode', async (req, res) => {
             gvwr: data.gross_vehicle_weight_rating || '',
             manufacturer: data.manufacturer || data.make || '',
             plantCountry: data.made_in || '',
-            // Additional carAPI specific fields
             transmission: data.transmission || '',
             mpgCity: data.mpg_city || '',
             mpgHighway: data.mpg_highway || '',
@@ -109,7 +157,7 @@ app.post('/api/vehicle/decode', async (req, res) => {
             });
         }
         
-        // Calculate base value (enhanced with carAPI data)
+        // Calculate base value
         const baseValue = calculateBaseValue(vehicleInfo, data.msrp);
         
         res.json({
@@ -121,9 +169,10 @@ app.post('/api/vehicle/decode', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('VIN decode error:', error.response?.data || error.message);
+        console.error('VIN decode error:', error.message);
+        console.error('Error details:', error.response?.data || 'No response data');
+        console.error('Error status:', error.response?.status || 'No status');
         
-        // Handle carAPI specific errors
         if (error.response?.status === 401) {
             return res.status(500).json({ 
                 error: 'API authentication failed',
@@ -147,22 +196,20 @@ app.post('/api/vehicle/decode', async (req, res) => {
         
         res.status(500).json({ 
             error: 'Failed to decode VIN',
-            message: error.message 
+            message: error.message || 'Unknown error occurred'
         });
     }
 });
 
-// Enhanced helper function with MSRP data from carAPI
+// Helper function
 function calculateBaseValue(vehicle, msrp) {
     let baseValue = 20000;
     
-    // If we have MSRP from carAPI, use it as a better starting point
     if (msrp && msrp > 0) {
         const year = parseInt(vehicle.year);
         const currentYear = new Date().getFullYear();
         const age = currentYear - year;
         
-        // Apply depreciation to MSRP
         let depreciationRate = 1;
         if (age <= 1) depreciationRate = 0.80;
         else if (age <= 2) depreciationRate = 0.70;
@@ -174,12 +221,10 @@ function calculateBaseValue(vehicle, msrp) {
         
         baseValue = msrp * depreciationRate;
     } else {
-        // Fallback to original estimation if no MSRP
         const year = parseInt(vehicle.year);
         const currentYear = new Date().getFullYear();
         const age = currentYear - year;
         
-        // Depreciation estimate
         if (age <= 1) baseValue = 35000;
         else if (age <= 3) baseValue = 28000;
         else if (age <= 5) baseValue = 22000;
@@ -187,7 +232,6 @@ function calculateBaseValue(vehicle, msrp) {
         else if (age <= 10) baseValue = 14000;
         else baseValue = 10000;
         
-        // Adjust for vehicle type
         if (vehicle.bodyClass?.toLowerCase().includes('truck')) baseValue *= 1.2;
         if (vehicle.bodyClass?.toLowerCase().includes('suv')) baseValue *= 1.15;
         if (vehicle.make?.toLowerCase().includes('bmw') || 
@@ -199,5 +243,5 @@ function calculateBaseValue(vehicle, msrp) {
     return Math.round(baseValue);
 }
 
-// THIS MUST BE AT THE VERY END
+// Export for Vercel
 module.exports = app;
